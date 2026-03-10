@@ -13,6 +13,7 @@ uint64_t thL = 0, thP = 1000;
 void  oscillate(void);
 void  pidControl(void);
 void  measure(void);
+void  justMove(void);
 float notchFilter(float, float);
 
 
@@ -63,7 +64,8 @@ void setup() {
 	sens_thresh.setMeasurementTimingBudget(20000);
 	sens_thresh.startContinuous();
 
-	pidControl();
+	justMove();
+	// pidControl();
 	// oscillate();
 	// measure();
 }
@@ -106,6 +108,83 @@ void oscillate() {
 			stepper1.moveTo(pos); // run "forever"
 			stepper1.setSpeed(500);
 			delay(1000);
+		}
+	}
+}
+
+
+void justMove() {
+	int set1, set2, out1, out2;
+
+	int setpoint, in;
+
+	stepper1.setMaxSpeed(500);
+	stepper1.setCurrentPosition(stepper1.currentPosition());
+	stepper1.setSpeed(-20);
+
+	enum init { RANGING1, MOVING1, RANGING2, MOVING2, DONE };
+	enum init state = RANGING1;
+
+	do {
+		setpoint = sens_thresh.readRangeContinuousMillimeters();
+		in		 = sens_in.readRangeContinuousMillimeters();
+		if (sens_thresh.timeoutOccurred() || sens_in.timeoutOccurred() || setpoint > 1000 || in > 1000) continue;
+
+		switch (state) {
+			case RANGING1:
+				if (setpoint - in <= -60) state = MOVING1;
+				break;
+			case MOVING1:
+				stepper1.runSpeed();
+				if (in <= setpoint) {
+					state = RANGING2;
+					set1 = setpoint, out1 = stepper1.currentPosition();
+				}
+				break;
+			case RANGING2:
+				if (setpoint - in >= 120) {
+					stepper1.setSpeed(20);
+					state = MOVING2;
+				}
+				break;
+			case MOVING2:
+				stepper1.runSpeed();
+				if (in >= setpoint) {
+					set2 = setpoint, out2 = stepper1.currentPosition();
+					state = DONE;
+				}
+				break;
+		}
+	} while (state != DONE);
+
+	Serial.print(set1);
+	Serial.print(", ");
+	Serial.print(out1);
+	Serial.print(", ");
+	Serial.print(set2);
+	Serial.print(", ");
+	Serial.println(out2);
+
+
+	int		 speed = 80;
+	uint64_t calcP = 20, calcL = millis();
+
+	while (1) {
+		stepper1.runSpeed();
+
+		if (millis() > calcL + calcP) {
+			calcL += calcP;
+
+			setpoint = sens_thresh.readRangeContinuousMillimeters();
+			int pos	 = stepper1.currentPosition();
+			int targ = map(setpoint, set1, set2, out1, out2);
+			// in		 = sens_in.readRangeContinuousMillimeters();
+
+			// if (in > setpoint)
+
+			// stepper1.moveTo(map(setpoint, set1, set2, out1, out2));
+			if (abs(pos - targ) > 10) stepper1.setSpeed(pos - targ > 0 ? -speed : speed);
+			else stepper1.setSpeed(0);
 		}
 	}
 }
