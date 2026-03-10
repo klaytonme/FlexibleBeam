@@ -144,7 +144,7 @@ void pidControl() {
 	float	 integral = 0;
 
 	// Tune these — start with kd=0, increase slowly
-	float kp = 1.2f, ki = 0, kd = 0.3f;
+	float kp = 1.2f, ki = 0, kd = 0.0f;
 	float integralLimit = 200.0f;
 
 	uint64_t calcP = 20;
