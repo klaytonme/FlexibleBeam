@@ -64,8 +64,8 @@ void setup() {
 	sens_thresh.setMeasurementTimingBudget(20000);
 	sens_thresh.startContinuous();
 
-	// justMove();
-	pidControl();
+	justMove();
+	// pidControl();
 	// oscillate();
 	// measure();
 }
