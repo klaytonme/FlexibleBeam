@@ -64,8 +64,8 @@ void setup() {
 	sens_thresh.setMeasurementTimingBudget(20000);
 	sens_thresh.startContinuous();
 
-	justMove();
-	// pidControl();
+	// justMove();
+	pidControl();
 	// oscillate();
 	// measure();
 }
@@ -166,7 +166,7 @@ void justMove() {
 	Serial.println(out2);
 
 
-	int		 speed = 60;
+	int		 speed = 80;
 	uint64_t calcP = 20, calcL = millis();
 
 	while (1) {
