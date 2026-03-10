@@ -144,7 +144,7 @@ void pidControl() {
 	float	 integral = 0;
 
 	// Tune these — start with kd=0, increase slowly
-	float kp = 1.2f, ki = 0, kd = 0.0f;
+	float kp = 1.2f, ki = 0, kd = 0.02f;
 	float integralLimit = 200.0f;
 
 	uint64_t calcP = 20;
@@ -183,6 +183,7 @@ void pidControl() {
 			integral = constrain(integral + eFiltered * dt, -integralLimit, integralLimit);
 
 			v = (long)constrain(kp * eFiltered + ki * integral + kd * d, -400, 400);
+			if (abs(v) < 10) v = 0;
 
 			Serial.print(in);
 			Serial.print(",");
