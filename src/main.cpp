@@ -120,46 +120,52 @@ void oscillate() {
 //   A  = (I - K*H) * F  (combined predict+update matrix)
 
 struct KalmanFilter {
-	float pos = 209.0f; // estimated position (mm)
-	float vel = 0.0f;	// estimated velocity (mm/s)
+	float pos = 209.0f;
+	float vel = 0.0f;
 
+	// Coefficients from Riccati solver (Q_vel=1.0, R=10.3, dt=20ms)
+	// Beam model: wn=7.92 rad/s, zeta=0.112
 	void update(float measurement, float equilibrium) {
 		float m		  = measurement - equilibrium;
 		float p		  = pos - equilibrium;
-		float new_pos = 0.891847f * p + 0.017670f * vel + 0.096984f * m;
-		float new_vel = -1.242784f * p + 0.952652f * vel + 0.015938f * m;
+		float new_pos = 0.91188536f * p + 0.01806725f * vel + 0.07669427f * m;
+		float new_vel = -1.14811682f * p + 0.95452777f * vel - 0.07991464f * m;
+		pos			  = constrain(new_pos + equilibrium, 0.0f, 500.0f);
+		vel			  = constrain(new_vel, -2000.0f, 2000.0f);
+	}
+
+	void coast(float equilibrium) {
+		float p		  = pos - equilibrium;
+		float new_pos = 0.91188536f * p + 0.01806725f * vel;
+		float new_vel = -1.14811682f * p + 0.95452777f * vel;
 		pos			  = constrain(new_pos + equilibrium, 0.0f, 500.0f);
 		vel			  = constrain(new_vel, -2000.0f, 2000.0f);
 	}
 };
 
-// ---- PID ----
 struct PID {
 	float kp, kd;
 
-	PID(float p, float d, float ilim) : kp(p), kd(d) {}
+	PID(float p, float d) : kp(p), kd(d) {}
 
-	float compute(float error, float velocity, float dt) {
-		// D term uses Kalman velocity — clean, no finite-difference noise
-		return kp * error + kd * (-velocity);
-	}
+	float compute(float error, float velocity) { return kp * error + kd * (-velocity); }
 };
 
 KalmanFilter kf;
-PID			 pid(1.5f, 0.5f, 300.0f);
+PID			 pid(1.5f, 0.0f); // start with Kd=0, tune Kp first, then add Kd slowly
 
 void control() {
-	uint16_t	   setpoint = 200;
-	const uint32_t calcP	= 20;
-	const float	   dt		= 0.02f;
+	const uint32_t calcP = 20;
 
 	stepper1.setMaxSpeed(500);
 	stepper1.setSpeed(0);
 	stepper1.setCurrentPosition(stepper1.currentPosition());
 	stepper1.setBound(40);
 
-	kf.pos		   = sens_in.readRangeContinuousMillimeters();
-	uint64_t calcL = millis();
+	kf.pos = sens_in.readRangeContinuousMillimeters();
+
+	uint64_t calcL	= millis();
+	float	 last_v = 0.0f;
 
 	while (1) {
 		stepper1.runSpeedBounded();
@@ -167,21 +173,19 @@ void control() {
 		if (millis() >= calcL + calcP) {
 			calcL += calcP;
 
-			setpoint		= sens_thresh.readRangeContinuousMillimeters();
-			uint16_t raw_in = sens_in.readRangeContinuousMillimeters();
+			uint16_t setpoint = sens_thresh.readRangeContinuousMillimeters();
+			uint16_t raw_in	  = sens_in.readRangeContinuousMillimeters();
 
 			if (!sens_in.timeoutOccurred() && raw_in < 1000) {
 				kf.update((float)raw_in, (float)setpoint);
 			} else {
-				// Let the physics model coast — don't corrupt state with 8191
-				float new_pos = 0.891847f * (kf.pos - setpoint) + 0.017670f * kf.vel;
-				float new_vel = -1.242784f * (kf.pos - setpoint) + 0.952652f * kf.vel;
-				kf.pos		  = constrain(new_pos + setpoint, 0.0f, 500.0f);
-				kf.vel		  = constrain(new_vel, -2000.0f, 2000.0f);
+				kf.coast((float)setpoint);
 			}
 
 			float error = (float)setpoint - kf.pos;
-			float v		= pid.compute(error, kf.vel, dt);
+			float v		= pid.compute(error, kf.vel);
+			last_v		= constrain(v, -500.0f, 500.0f);
+			stepper1.setSpeed((long)last_v);
 
 			Serial.print(raw_in);
 			Serial.print(", ");
@@ -193,9 +197,7 @@ void control() {
 			Serial.print(", ");
 			Serial.print(kf.vel);
 			Serial.print(", ");
-			Serial.println(v);
-
-			stepper1.setSpeed((long)constrain(v, -500.0f, 500.0f));
+			Serial.println(last_v);
 		}
 	}
 }
