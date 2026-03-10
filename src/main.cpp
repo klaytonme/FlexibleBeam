@@ -11,7 +11,7 @@ uint64_t pulseL = 0, pulseP = 20000;
 uint64_t thL = 0, thP = 1000;
 
 void  oscillate(void);
-void  pidControl(void);
+void  control(void);
 void  measure(void);
 float notchFilter(float, float);
 
@@ -63,7 +63,7 @@ void setup() {
 	sens_thresh.setMeasurementTimingBudget(20000);
 	sens_thresh.startContinuous();
 
-	pidControl();
+	control();
 	// oscillate();
 	// measure();
 }
@@ -110,89 +110,92 @@ void oscillate() {
 	}
 }
 
-// Precompute notch coefficients once — do this at startup
-struct NotchCoeffs {
-	float b0, b1, b2, a1, a2;
-} notch;
+// Steady-state Kalman filter — all matrices pre-solved offline.
+// P has converged, so gain K is constant. The predict+update cycle
+// reduces to a single matrix-vector multiply with baked-in coefficients.
+//
+// From Riccati solution (run once in Python, never again on the MCU):
+//   K0 = 0.096984  (position correction gain)
+//   K1 = 0.015938  (velocity correction gain)
+//   A  = (I - K*H) * F  (combined predict+update matrix)
 
-void initNotchFilter(float f_notch, float f_sample) {
-	float w0 = 2.0f * PI * f_notch / f_sample;
-	float r	 = 0.95f; // Close to 1 = narrow, deep notch
-	notch.b0 = 1.0f;
-	notch.b1 = -2.0f * cos(w0);
-	notch.b2 = 1.0f;
-	notch.a1 = -2.0f * r * cos(w0);
-	notch.a2 = r * r;
-}
+struct KalmanFilter {
+	float pos = 209.0f; // estimated position (mm)
+	float vel = 0.0f;	// estimated velocity (mm/s)
 
-float notch_x1 = 0, notch_x2 = 0, notch_y1 = 0, notch_y2 = 0;
-float notchFilter(float input) {
-	float output =
-		notch.b0 * input + notch.b1 * notch_x1 + notch.b2 * notch_x2 - notch.a1 * notch_y1 - notch.a2 * notch_y2;
-	notch_x2 = notch_x1;
-	notch_x1 = input;
-	notch_y2 = notch_y1;
-	notch_y1 = output;
-	return output;
-}
+	void update(float measurement, float equilibrium) {
+		float m		  = measurement - equilibrium;
+		float p		  = pos - equilibrium;
+		float new_pos = 0.891847f * p + 0.017670f * vel + 0.096984f * m;
+		float new_vel = -1.242784f * p + 0.952652f * vel + 0.015938f * m;
+		pos			  = constrain(new_pos + equilibrium, 0.0f, 500.0f);
+		vel			  = constrain(new_vel, -2000.0f, 2000.0f);
+	}
+};
 
-void pidControl() {
-	long	 v		  = 0;
-	uint16_t setpoint = 200, in;
-	float	 eFiltered, eFilteredLast = 0;
-	float	 d, dRaw;
-	float	 integral = 0;
+// ---- PID ----
+struct PID {
+	float kp, kd;
 
-	// Tune these — start with kd=0, increase slowly
-	float kp = 1.2f, ki = 0, kd = 0.3f;
-	float integralLimit = 200.0f;
+	PID(float p, float d, float ilim) : kp(p), kd(d) {}
 
-	uint64_t calcP = 20;
+	float compute(float error, float velocity, float dt) {
+		// D term uses Kalman velocity — clean, no finite-difference noise
+		return kp * error + kd * (-velocity);
+	}
+};
 
-	const float dt = calcP / 1000.0f; // 0.02s
+KalmanFilter kf;
+PID			 pid(1.5f, 0.5f, 300.0f);
 
-	// Init notch for 1.25Hz at 50Hz sample rate
-	initNotchFilter(1.25f, 1000.0f / calcP);
+void control() {
+	uint16_t	   setpoint = 200;
+	const uint32_t calcP	= 20;
+	const float	   dt		= 0.02f;
 
 	stepper1.setMaxSpeed(500);
-	stepper1.setSpeed(500);
+	stepper1.setSpeed(0);
 	stepper1.setCurrentPosition(stepper1.currentPosition());
 	stepper1.setBound(40);
 
+	kf.pos		   = sens_in.readRangeContinuousMillimeters();
 	uint64_t calcL = millis();
 
 	while (1) {
 		stepper1.runSpeedBounded();
 
-		if (millis() > calcL + calcP) {
+		if (millis() >= calcL + calcP) {
 			calcL += calcP;
 
-			setpoint = sens_thresh.readRangeContinuousMillimeters();
-			in		 = sens_in.readRangeContinuousMillimeters();
-			if (sens_in.timeoutOccurred() || in >= 8190) continue;
+			setpoint		= sens_thresh.readRangeContinuousMillimeters();
+			uint16_t raw_in = sens_in.readRangeContinuousMillimeters();
 
-			float e = (float)(setpoint - in);
+			if (!sens_in.timeoutOccurred() && raw_in < 1000) {
+				kf.update((float)raw_in, (float)setpoint);
+			} else {
+				// Let the physics model coast — don't corrupt state with 8191
+				float new_pos = 0.891847f * (kf.pos - setpoint) + 0.017670f * kf.vel;
+				float new_vel = -1.242784f * (kf.pos - setpoint) + 0.952652f * kf.vel;
+				kf.pos		  = constrain(new_pos + setpoint, 0.0f, 500.0f);
+				kf.vel		  = constrain(new_vel, -2000.0f, 2000.0f);
+			}
 
-			// Filter THEN differentiate
-			eFiltered	  = notchFilter(e);
-			dRaw		  = (eFiltered - eFilteredLast) / dt;
-			d			  = 0.7f * d + 0.3f * dRaw; // low-pass on derivative
-			eFilteredLast = eFiltered;
+			float error = (float)setpoint - kf.pos;
+			float v		= pid.compute(error, kf.vel, dt);
 
-			// Integral with anti-windup clamp
-			integral = constrain(integral + eFiltered * dt, -integralLimit, integralLimit);
-
-			v = (long)constrain(kp * eFiltered + ki * integral + kd * d, -400, 400);
-
-			Serial.print(in);
-			Serial.print(",");
+			Serial.print(raw_in);
+			Serial.print(", ");
 			Serial.print(setpoint);
-			Serial.print(",");
-			Serial.print(e);
-			Serial.print(",");
+			Serial.print(", ");
+			Serial.print(error);
+			Serial.print(", ");
+			Serial.print(kf.pos);
+			Serial.print(", ");
+			Serial.print(kf.vel);
+			Serial.print(", ");
 			Serial.println(v);
 
-			stepper1.setSpeed(v);
+			stepper1.setSpeed((long)constrain(v, -500.0f, 500.0f));
 		}
 	}
 }
