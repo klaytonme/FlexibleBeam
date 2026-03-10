@@ -1,0 +1,78 @@
+# -------- BASE STYLE --------
+BasedOnStyle: LLVM # You can change to: LLVM, Google, Chromium, Mozilla, WebKit
+Language: Cpp
+
+# -------- GENERAL FORMATTING --------
+IndentWidth: 4
+TabWidth: 4
+UseTab: Always # Options: Never, ForIndentation, ForContinuationAndIndentation, Always
+ColumnLimit: 120
+ContinuationIndentWidth: 4
+IndentCaseLabels: true
+IndentPPDirectives: AfterHash # Options: None, BeforeHash, AfterHash
+MaxEmptyLinesToKeep: 3
+
+# -------- BRACES --------
+BreakBeforeBraces: Attach # Main global brace style
+
+BraceWrapping:
+  AfterCaseLabel: false
+  AfterClass: false
+  AfterControlStatement: false
+  AfterEnum: false
+  AfterFunction: false # <-- SAME-LINE FUNCTION OPENING BRACE
+  AfterNamespace: false
+  AfterStruct: false
+  AfterUnion: false
+  BeforeCatch: false
+  BeforeElse: false
+  IndentBraces: false
+
+# -------- SPACING --------
+SpaceBeforeParens: ControlStatements # Options: Never, ControlStatements, Always
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+SpaceInEmptyParentheses: false
+SpacesInCStyleCastParentheses: false
+SpaceAfterCStyleCast: false
+SpaceBeforeAssignmentOperators: true
+SpacesInContainerLiterals: false
+
+# -------- POINTER / REFERENCE STYLE --------
+PointerAlignment: Left # Options: Left, Right, Middle
+ReferenceAlignment: Pointer
+
+# -------- LINE BREAKING --------
+AllowShortFunctionsOnASingleLine: All # Options: None, Inline, InlineOnly, Empty, All
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortLoopsOnASingleLine: false
+
+# -------- INCLUDES --------
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<.*\.h>'
+    Priority: 1
+  - Regex: '^".*\.h"'
+    Priority: 2
+IncludeIsMainRegex: "([-_]?tests?)$"
+
+# -------- ALIGNMENT --------
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: true
+AlignConsecutiveDeclarations: true
+AlignConsecutiveMacros: true
+AlignEscapedNewlines: Right
+AlignOperands: true
+AlignTrailingComments: true
+
+# -------- NAMESPACE HANDLING --------
+IndentNamespace: Inner # Options: None, Inner, All
+FixNamespaceComments: true
+
+# -------- COMMENTS --------
+ReflowComments: true
+SpacesBeforeTrailingComments: 1
+
+# -------- OTHER --------
+SortIncludes: true
+SortUsingDeclarations: true
